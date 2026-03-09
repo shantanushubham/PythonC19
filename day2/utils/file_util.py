@@ -31,3 +31,12 @@ def read_csv(file_path):
     reader = csv.DictReader(file)
     for row in reader:
       print(row['name'])
+
+def write_to_csv(file_path, to_write):
+  with open(file_path, 'w', newline='') as file:
+    fieldnames = ['name', 'age']
+    writer = csv.DictWriter(file, fieldnames=fieldnames)
+
+    writer.writeheader()
+    for row in to_write:
+      writer.writerow(row)
