@@ -1,0 +1,9 @@
+Every user currently has a PhoneNumber and password
+
+
+In most situations, every kind of user will have 3 things:
+1. username - (in our case - phone number)
+2. password
+3. roles = [roles]
+
+These things are a part of AbstractBaseUser

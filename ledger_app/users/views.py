@@ -1,7 +1,8 @@
-from datetime import date
+from datetime import date, timedelta
+from django.utils import timezone
 
 from django.db import transaction as db_transaction
-from django.db.models import Q, Sum as models_sum
+from django.db.models import Q, Sum as models_sum, Count
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.request import Request
@@ -14,6 +15,7 @@ from users.jwt_util import generate_token
 from .bcrypt_util import verify_password
 from .models import Account, Budget, Transaction, User
 from .payment import get_payment_processor
+from .permissions import IsAdminUser
 from .serializers import (
     AccountSerializer,
     BudgetSerializer,
@@ -133,7 +135,29 @@ class TransactionViewSet(ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        # Step 5: Process payment atomically
+        # Step 5: Enforce daily send limit for BASIC_USER
+        sender = from_account.user
+        if sender.user_type == User.UserType.BASIC:
+            window_start = timezone.now() - timedelta(hours=24)
+            sent_in_window = Transaction.objects.filter(
+                from_account__user=sender,
+                created_at__gte=window_start,
+                status=Transaction.Status.COMPLETED,
+            ).aggregate(total=models_sum("amount"))["total"] or 0
+
+            if sent_in_window + data["amount"] > User.BASIC_DAILY_LIMIT:
+                return Response(
+                    {
+                        "error": (
+                            f"Daily transfer limit exceeded. "
+                            f"BASIC_USER limit: ₹{User.BASIC_DAILY_LIMIT:,} per 24 hours. "
+                            f"Sent so far: ₹{sent_in_window:,}, Requested: ₹{data['amount']}."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Step 6: Process payment atomically
         try:
             with db_transaction.atomic():
                 processor.pay(data["amount"], from_account, to_account)
@@ -154,7 +178,7 @@ class TransactionViewSet(ModelViewSet):
     @action(detail=False, methods=["GET"], url_path="history")
     def get_transaction_history_for_user(self, request: Request):
         # Verify JWT Token
-        user_id = request.query_params.get("user_id")
+        user_id = request.user.id
         start_date = request.query_params.get("start_date")
         end_date = request.query_params.get("end_date")
 
@@ -237,5 +261,56 @@ class LoginView(APIView):
         jwt_token = generate_token(user)
         return Response(
             {"user": UserSerializer(user).data, "token": jwt_token},
+            status=status.HTTP_200_OK,
+        )
+
+
+class TransactionSummaryView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request: Request):
+        date_str = request.query_params.get("date")
+        if not date_str:
+            return Response(
+                {"error": "Query parameter 'date' is required (YYYY-MM-DD)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            query_date = date.fromisoformat(date_str)
+        except ValueError:
+            return Response(
+                {"error": "Invalid date format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        today = timezone.now().date()
+
+        if query_date > today:
+            return Response(
+                {"error": "Date cannot be in the future."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if query_date == today:
+            # Only count transactions up to right now
+            qs = Transaction.objects.filter(
+                created_at__date=today,
+                created_at__lte=timezone.now(),
+            )
+        else:
+            qs = Transaction.objects.filter(created_at__date=query_date)
+
+        result = qs.aggregate(
+            total_amount=models_sum("amount"),
+            total_count=Count("id"),
+        )
+
+        return Response(
+            {
+                "date": date_str,
+                "transaction_count": result["total_count"] or 0,
+                "total_amount": result["total_amount"] or 0,
+            },
             status=status.HTTP_200_OK,
         )

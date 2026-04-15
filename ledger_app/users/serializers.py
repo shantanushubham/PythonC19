@@ -14,6 +14,7 @@ class UserSerializer(serializers.ModelSerializer):
             "dob",
             "phone_number",
             "default_account",
+            "user_type",
         ]
 
 
@@ -31,7 +32,7 @@ class SignupSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         raw_password = validated_data.pop("password")
-        return User.objects.create(password=hash_password(raw_password), **validated_data)
+        return User.objects.create_user(password=hash_password(raw_password), **validated_data)
 
 
 class LoginSerializer(serializers.Serializer):

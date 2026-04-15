@@ -1,7 +1,6 @@
-from enum import Enum
+def print_values(**kwargs):
+    print(kwargs)
 
-class AccountType(Enum):
-  SAVINGS = "Savings"
-  CURRENT = "Current"
 
-account_type = AccountType.CURRENT
+values = {"name": "Shantanu", "age": 27}
+print_values(**values)

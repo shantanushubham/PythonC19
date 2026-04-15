@@ -1,14 +1,52 @@
 import uuid
 
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.db import models
 
 
-class User(models.Model):
+class UserManager(BaseUserManager):
+
+    def create_user(self, phone_number, password=None, **extra_fields):
+        """
+        This function overrides the create_user function in BaseUserManager.
+        Its job is to create a user. We are overriding because we want our 
+        own custom logic while creating a user.
+        """
+        if not phone_number:
+            raise ValueError("Phone number is required")
+        user = self.model(phone_number=phone_number, **extra_fields)
+        user.password = password  # expects a pre-hashed value from bcrypt_util
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, phone_number, password=None, **extra_fields):
+        extra_fields.setdefault("is_active", True)
+        return self.create_user(phone_number, password, **extra_fields)
+
+
+class User(AbstractBaseUser):
+
+    class UserType(models.TextChoices):
+        BASIC = "BASIC_USER", "Basic User"
+        PREMIUM = "PREMIUM_USER", "Premium User"
+
+    class Role(models.TextChoices):
+        ADMIN = "ADMIN", "Admin"
+        NON_ADMIN = "NON_ADMIN", "Non Admin"
+
+    BASIC_DAILY_LIMIT = 50_000
+
     first_name = models.CharField(max_length=50)
     last_name = models.CharField(max_length=50)
     dob = models.DateField()
     phone_number = models.CharField(max_length=15, blank=False, unique=True)
-    password = models.CharField(max_length=128)
+    is_active = models.BooleanField(default=True)
+    user_type = models.CharField(
+        max_length=20, choices=UserType.choices, default=UserType.BASIC
+    )
+    role = models.CharField(
+        max_length=20, choices=Role.choices, default=Role.NON_ADMIN
+    )
     default_account = models.ForeignKey(
         "Account",
         null=True,
@@ -17,7 +55,10 @@ class User(models.Model):
         related_name="default_for_user",
     )
 
-    is_authenticated = True
+    USERNAME_FIELD = "phone_number"
+    REQUIRED_FIELDS = ["first_name", "last_name", "dob"]
+
+    objects: UserManager = UserManager()
 
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
