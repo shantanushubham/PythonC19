@@ -17,6 +17,14 @@ from utils.math_util import divide
 
 # write_to_json("./files/users.json", users)
 
+#write to csv
+# to_write = [
+#   {"name": "Shantanu", "age": 23},
+#   {"name": "Aman", "age": 22},
+#   {"name": "Riya", "age": 21}
+# ]
+# write_to_csv("./files/shantanu.csv", to_write)
+
 try: # Doubtful Code that can throw the exception
   # read_csv("./files/shantanu.csv")
   divide(10, 0)

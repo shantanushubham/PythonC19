@@ -62,7 +62,7 @@ empty = []
 
 
 # print(numbers)
-# numbers_copy = copy.deepcopy(numbers)
+# numbers_copy = copy.deepcopy(numbers) We need copy module to do deep copy for 2D arrays or nested arrays(import copy)
 # print(numbers_copy)
 
 # numbers[0][0] = 100

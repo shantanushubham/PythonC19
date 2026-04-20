@@ -3,7 +3,7 @@
 # 2. Wheels
 # 3. Color
 # 4. Chassis
-# 5. Headights
+# 5. Headlights
 
 # Car1 - is a car from car-idea
 # Car2 - is a car from car-idea
