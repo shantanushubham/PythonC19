@@ -1,16 +1,20 @@
 from datetime import date, timedelta
+import random
+import time
+from django.http import JsonResponse
 from django.utils import timezone
 
 from django.db import transaction as db_transaction
 from django.db.models import Q, Sum as models_sum, Count
 from rest_framework import status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.views import APIView, View
 from rest_framework.viewsets import ModelViewSet
 
 from users.jwt_util import generate_token
+import requests
 
 from .bcrypt_util import verify_password
 from .models import Account, Budget, Transaction, User
@@ -27,6 +31,11 @@ from .serializers import (
     TransactionSerializer,
     UserSerializer,
 )
+
+from celery import shared_task
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UserViewSet(ModelViewSet):
@@ -139,11 +148,14 @@ class TransactionViewSet(ModelViewSet):
         sender = from_account.user
         if sender.user_type == User.UserType.BASIC:
             window_start = timezone.now() - timedelta(hours=24)
-            sent_in_window = Transaction.objects.filter(
-                from_account__user=sender,
-                created_at__gte=window_start,
-                status=Transaction.Status.COMPLETED,
-            ).aggregate(total=models_sum("amount"))["total"] or 0
+            sent_in_window = (
+                Transaction.objects.filter(
+                    from_account__user=sender,
+                    created_at__gte=window_start,
+                    status=Transaction.Status.COMPLETED,
+                ).aggregate(total=models_sum("amount"))["total"]
+                or 0
+            )
 
             if sent_in_window + data["amount"] > User.BASIC_DAILY_LIMIT:
                 return Response(
@@ -230,7 +242,8 @@ class SignupView(APIView):
         user = serializer.save()
         jwt_token = generate_token(user)
         return Response(
-            {"user": UserSerializer(user).data, "token": jwt_token}, status=status.HTTP_201_CREATED
+            {"user": UserSerializer(user).data, "token": jwt_token},
+            status=status.HTTP_201_CREATED,
         )
 
 
@@ -245,6 +258,7 @@ class LoginView(APIView):
         password = serializer.validated_data["password"]
 
         try:
+            # SELECT * FROM users WHERE phone_number=<phone_number>
             user = User.objects.get(phone_number=phone_number)
         except User.DoesNotExist:
             return Response(
@@ -295,15 +309,13 @@ class TransactionSummaryView(APIView):
         if query_date == today:
             # Only count transactions up to right now
             qs = Transaction.objects.filter(
-                created_at__date=today,
-                created_at__lte=timezone.now(),
+                created_at__date=today, created_at__lte=timezone.now()
             )
         else:
             qs = Transaction.objects.filter(created_at__date=query_date)
 
         result = qs.aggregate(
-            total_amount=models_sum("amount"),
-            total_count=Count("id"),
+            total_amount=models_sum("amount"), total_count=Count("id")
         )
 
         return Response(
@@ -314,3 +326,49 @@ class TransactionSummaryView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CalculatorView(View):
+
+    def get(self, request):
+        a = request.GET.get("a")
+        b = request.GET.get("b")
+        try:
+            # Takes 60 seconds
+            response = requests.get(
+                "http://localhost:8080/add", params={"a": a, "b": b}
+            )
+            # Code Block 1 starts
+            if response.status_code == 200:
+                result = response.json()
+                return JsonResponse({"sum": result}, status=200)
+            return JsonResponse({"error": "Java Backend returned an error."}, status=response.status_code)
+            # Code Block 1 ends
+        except requests.exceptions.ConnectionError:
+            return JsonResponse({"error": "Java Backend not available."}, status=503)
+
+    def subtract(self):
+        pass
+
+
+@api_view(["POST"])
+def send_email(request: Request):
+    send_email_task.delay()
+    return Response(status=200)
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=5)
+def send_email_task(self):
+    try:
+        logger.info("send_email_task started (attempt %d)", self.request.retries + 1)
+        time.sleep(2)
+        if random.random() < 0.3:
+            raise Exception("Simulated email sending failure")
+        logger.info("send_email_task completed successfully")
+    except Exception as exc:
+        logger.error("send_email_task failed: %s", exc, exc_info=True)
+        raise self.retry(exc=exc)
+
+@shared_task
+def send_daily_report():
+    logger.info("Sending Report...")
+

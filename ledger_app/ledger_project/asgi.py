@@ -9,8 +9,12 @@ https://docs.djangoproject.com/en/6.0/howto/deployment/asgi/
 
 import os
 
+from decouple import config
 from django.core.asgi import get_asgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ledger_project.settings')
+os.environ.setdefault(
+    'DJANGO_SETTINGS_MODULE',
+    config('DJANGO_SETTINGS_MODULE', default='ledger_project.settings.local'),
+)
 
 application = get_asgi_application()
